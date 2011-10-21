@@ -3,8 +3,13 @@
 
 'use strict';
 
+//Used for Daniels new App chromeless mode
+window.onerror = function(evt) {
+	alert(evt);
+};
+
 var kDefaultURL = 'compressed.tracemonkey-pldi-09.pdf';
-var kDefaultScale = 1.5;
+var kDefaultScale = 1.2;
 var kDefaultScaleDelta = 1.1;
 var kCacheSize = 20;
 var kCssUnits = 96.0 / 72.0;
@@ -36,32 +41,42 @@ var PDFDB = function pdfdbPDFDB(options) {
 	
 	// shortcuts to vendor-prefixed classes
 	var IndexedDB = window.mozIndexedDB || window.webkitIndexedDB || window.IndexedDB || null;
+	var Transaction = window.webkitIDBTransaction || window.IDBTransaction || null;
 	
 	if (!IndexedDB) {
 		if (options.onError)
 			options.onError();
-		return null; // fail fast for oldies
+		return this; // fail fast for oldies
 	}
 	
 	var empty = function pdfdbEmpty() {};
 	
-	var Transaction = window.webkitIDBTransaction || window.IDBTransaction || null;
+	// private variables
+	var db;
 	
-	var self = this;
-	
-	var db, objectStore;
+	// schema configuration
 	var version = '1',
 		schema = {
 			name: 'files',
 			options: {keyPath: 'name'}
 		};
 	
-	this.open = function pdfdbOpen() {
-		var reqOpen = IndexedDB.open('files');
+	var self = this;
+	
+	/**
+	 * Open IndexedDB connection
+	 */
+	this.init = function pdfdbOpen() {
+		try {
+			var reqOpen = IndexedDB.open('files');
+		} catch (e) {
+			if (options.onError)
+				options.onError();
+			return;
+		}
 		
 		reqOpen.onsuccess = function pdfdbOpenSuccess(evt) {
 	    db = evt.target.result;
-	    console.log('PDFDB.open', db, db.version, version);
 	    
 	    // First hit, initialize database.
 	    if (options.flush || db.version != version)
@@ -82,7 +97,7 @@ var PDFDB = function pdfdbPDFDB(options) {
         db.deleteObjectStore(schema.name);
       }
 			
-			objectStore = db.createObjectStore(schema.name, schema.options);
+			var objectStore = db.createObjectStore(schema.name, schema.options);
 			// TODO: objectStore.createIndex
 			
 			objectStore.onsuccess = function pdfdbCreateSuccess() {
@@ -166,12 +181,14 @@ var PDFDB = function pdfdbPDFDB(options) {
 		clearRequest.onerror = onError || empty;
 	};
 	
-	this.open();
+	this.init();
 	
 };
 
 /**
  * PDFDB test bed
+ * 
+ * TODO TDD when viewer has tests.
  *
 var db = new PDFDB({
 	onLoad: function() {
@@ -306,14 +323,19 @@ var PDFView = {
     if (PDFView.db) {
     	PDFView.openFromDb(url, scale);
     } else {
-    	PDFView.db = new PDFDB({
-    		onLoad: function() {
-    			PDFView.openFromDb(url, scale);
-    		},
-    		onError: function() {
-    			PDFView.openFromUrl(url, scale);
-    		}
-    	});
+    	if (!PDFView.db && PDFView.db == null) { // null or undefined, false when init failed
+    		PDFView.db = new PDFDB({
+    			onLoad: function() {
+    				PDFView.openFromDb(url, scale);
+    			},
+    			onError: function() {
+    				PDFView.db = false;
+    				PDFView.openFromUrl(url, scale);
+    			}
+    		});
+    	} else {
+    		PDFView.openFromUrl(url, scale);
+    	}
     }
   },
   
@@ -346,7 +368,7 @@ var PDFView = {
 	    },
 	    function getPdfLoad(buffer) {
 	    	
-	    	if (buffer instanceof ArrayBuffer) {
+	    	if (PDFView.db && buffer instanceof ArrayBuffer) {
 	    		buffer = new Uint8Array(buffer);
 	    		var str = new Array(buffer.length);
 					for (var i = 0, length = buffer.length; i < length; i += 1) {
@@ -354,9 +376,7 @@ var PDFView = {
 					}
 					str = str.join('');
 					
-					console.log('Saving file to DB');
-					
-		    	PDFView.db.putFile({
+	    		PDFView.db.putFile({
 		    		name: url,
 		    		data: str
 		    	}, function() {
@@ -375,38 +395,51 @@ var PDFView = {
 		select.innerHTML = '';
 		
 		var option = document.createElement('option');
-		option.text = 'Local Storage:';
+		option.value = '';
+		option.text = 'Local Documents';
 		option.disabled = true;
 		select.appendChild(option);
 		
 		PDFView.db.getAllFiles(function pdfViewUpdateListSuccess(result) {
 			var option = document.createElement('option');
-			option.text = select.value = result.name;
+			option.value = option.text = result.name;
 			
 			select.appendChild(option);
 			
 			option.selected = (result.name == PDFView.url) ? true : false;
 		}, function pdfViewUpdateListComplete() {
-			select.style.display = (select.childNodes.length > 1) ? '' : 'none'; 
+			var display = (select.childNodes.length > 1) ? '' : 'none';
+			select.style.display = display;
+			document.getElementById('fileDelete').style.display = display;
+			
 		});
   },
   
   install: function pdfViewInstall() {
-  	navigator.mozApps.install({
-		  url: location.href.replace(/[^\/]*$/, '') + 'manifest.webapp',
-		  onsuccess: function() {
+  	var url = location.href.replace(/[^\/]*$/, '') + 'manifest.webapp';
+  	navigator.mozApps.install(url, {}, function pdfViewInstallSuccess() {
 		  	document.getElementById('install').style.display = 'none';
 		  },
-	    onerror: function (errObj) {
+	    function pdfViewInstallError(errObj) {
 	      alert('Installation failed, try again later.');
 	    }
-		});
+	  );
   },
   
-  change: function pdfViewChange() {
+  changeToSelected: function pdfViewChangeToSelected() {
   	var value = document.getElementById('fileDropdown').value;
   	if (value && value != this.url) this.open(value);
   },
+  
+  deleteSelected: function pdfViewDeleteSelected() {
+  	if (!PDFView.db) return;
+  	
+  	var name = document.getElementById('fileDropdown').value;
+  	if (PDFView.db.deleteFile(name, function pdfViewDeleteSelectedSuccess() {
+  		PDFView.updateList();
+  		PDFView.changeToSelected();
+  	}));
+	},
 
   download: function pdfViewDownload() {
     window.open(this.url + '?pdfjs.action=download', '_parent');
@@ -865,7 +898,7 @@ window.addEventListener('load', function webViewerLoad(evt) {
     var param = params[i].split('=');
     params[unescape(param[0])] = unescape(param[1]);
   }
-
+  
   var scale = ('scale' in params) ? params.scale : kDefaultScale;
   PDFView.open(params.file || kDefaultURL, parseFloat(scale));
   

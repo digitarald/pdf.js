@@ -71,9 +71,12 @@
 
       <div class="separator"></div>
 
-			<select id="fileDropdown" onclick="PDFView.change();" oncontextmenu="return false;">
+			<select id="fileDropdown" onclick="PDFView.changeToSelected();" style="display: none" oncontextmenu="return false;">
 				<option disabled>Recent files</option>
 			</select>
+      <button id="fileDelete" onclick="PDFView.deleteSelected();" style="display: none" oncontextmenu="return false;">
+        X
+      </button>
       <input id="fileInput" type="file" oncontextmenu="return false;"/>
 
       <div class="separator"></div>

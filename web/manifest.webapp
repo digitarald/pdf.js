@@ -1,15 +1,16 @@
-{  
-  "version": "1.0",  
-  "name": "PDF Viewer",  
-  "description": "Viewing PDFs, the secure way!",  
-  "icons": {  
-    "16": "/images/icon-16.png",  
-    "48": "/images/icon-48.png",  
-    "128": "/images/icon-128.png"  
+{
+  "version": "1.0",
+  "name": "PDF Viewer",
+  "description": "Viewing PDFs, the secure way",
+  "launch_path": "/pdf.js/web/viewer.html",
+  "icons": {
+    "16": "/pdf.js/web/images/icon-16.png",
+    "48": "/pdf.js/web/images/icon-48.png",
+    "128": "/pdf.js/web/images/icon-128.png"
   },
-  "developer": {  
-    "name": "Mozilla Labs",  
-    "url": "http://mozillalabs.com"  
+  "developer": {
+	  "name": "Mozilla Labs",
+	  "url": "http://mozillalabs.com"
   },
-  "default_locale": "en"  
-}  
+	"installs_allowed_from": [ "*" ]
+}
