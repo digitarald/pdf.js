@@ -3,10 +3,10 @@
 
 'use strict';
 
-//Used for Daniels new App chromeless mode
-window.onerror = function(evt) {
-	alert(evt);
-};
+//Used to debug chromeless App mode
+//window.onerror = function(evt) {
+//	alert(evt);
+//};
 
 var kDefaultURL = 'compressed.tracemonkey-pldi-09.pdf';
 var kDefaultScale = 1.2;
@@ -55,7 +55,7 @@ var PDFDB = function pdfdbPDFDB(options) {
 	var db;
 	
 	// schema configuration
-	var version = '1',
+	var version = '1.1',
 		schema = {
 			name: 'files',
 			options: {keyPath: 'name'}
@@ -398,10 +398,14 @@ var PDFView = {
   },
 
   updateList: function pdfViewUpdateList() {
-  	// Should go somewhere else
 		var select = document.getElementById('fileDropdown');
+		
+		// User selected current document, no update required
+		if (select.value == this.url) return;
+		
 		select.innerHTML = '';
 		
+		// A nice little label
 		var option = document.createElement('option');
 		option.value = '';
 		option.text = 'Local Documents';
@@ -977,6 +981,7 @@ window.addEventListener('change', function webViewerChange(evt) {
   // Read as a binary string since "readAsArrayBuffer" is not yet
   // implemented in Firefox.
   var file = files[0];
+  document.title = this.url = file.name;
 
   // Read the local file into a Uint8Array.
   var fileReader = new FileReader();
@@ -1003,8 +1008,6 @@ window.addEventListener('change', function webViewerChange(evt) {
   };
   
   fileReader.readAsBinaryString(file);
-  
-  document.title = this.url = file.name;
 
   // URL does not reflect proper document location - hiding some icons.
   document.getElementById('viewBookmark').setAttribute('hidden', 'true');
