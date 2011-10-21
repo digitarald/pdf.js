@@ -241,10 +241,10 @@ var PDFView = {
     var pages = this.pages;
     for (var i = 0; i < pages.length; i++)
       pages[i].update(val * kCssUnits);
-    this.currentScale = val;
 
-    this.pages[this.page - 1].scrollIntoView();
-    this.pages[this.page - 1].draw();
+    if (this.currentScale != val)
+      this.pages[this.page - 1].scrollIntoView();
+    this.currentScale = val;
 
     var event = document.createEvent('UIEvents');
     event.initUIEvent('scalechange', false, false, window, 0);
@@ -310,6 +310,10 @@ var PDFView = {
     if (updateViewarea.inProgress)
       return;
 
+    // Avoid scrolling the first page during loading
+    if (this.loading && val == 1)
+      return;
+
     pages[val - 1].scrollIntoView();
   },
 
@@ -350,7 +354,9 @@ var PDFView = {
 			
 			PDFView.updateList();
 			
+			PDFView.loading = true;
 			PDFView.load(buffer, scale);
+			PDFView.loading = false;
 		}, function() {
 			PDFView.openFromUrl(url, scale);
 		});
@@ -384,7 +390,9 @@ var PDFView = {
 		    	});
 	    	}
 	    	
+	    	PDFView.loading = true;
 	      PDFView.load(buffer, scale);
+	      PDFView.loading = false;
 	    }
 	   );
   },
@@ -577,7 +585,7 @@ var PDFView = {
           var currentPage = this.pages[pageNumber - 1];
           currentPage.scrollIntoView(dest);
         } else
-          this.page = page; // simple page
+          this.page = params.page; // simple page
         return;
       }
     } else if (/^\d+$/.test(hash)) // page number
@@ -776,11 +784,11 @@ var PageView = function pageView(container, content, id, pageWidth, pageHeight,
     var canvas = document.createElement('canvas');
     canvas.id = 'page' + this.id;
     canvas.mozOpaque = true;
+    div.appendChild(canvas);
 
     var scale = this.scale;
     canvas.width = pageWidth * scale;
     canvas.height = pageHeight * scale;
-    div.appendChild(canvas);
 
     var ctx = canvas.getContext('2d');
     ctx.save();
@@ -914,6 +922,10 @@ window.addEventListener('load', function webViewerLoad(evt) {
     document.getElementById('fileInput').value = null;
 }, true);
 
+window.addEventListener('unload', function webViewerUnload(evt) {
+  window.scrollTo(0, 0);
+}, true);
+
 function updateViewarea() {
   var visiblePages = PDFView.getVisiblePages();
   for (var i = 0; i < visiblePages.length; i++) {
@@ -975,7 +987,10 @@ window.addEventListener('change', function webViewerChange(evt) {
 
     for (var i = 0; i < data.length; i++)
       uint8Array[i] = data.charCodeAt(i);
+    
+    PDFView.loading = true;
     PDFView.load(uint8Array);
+    PDFView.loading = false;
     
     if (PDFView.db) {
     	PDFView.db.putFile({
