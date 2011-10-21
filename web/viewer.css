@@ -55,6 +55,12 @@ body {
   opacity: 0.5;
 }
 
+#controls > select {
+	max-width: 110px;
+}
+#controls > input[type=file] {
+}
+
 #pageNumber {
   text-align: right;
 }

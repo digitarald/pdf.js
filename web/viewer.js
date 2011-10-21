@@ -28,6 +28,192 @@ var Cache = function cacheCache(size) {
 var cache = new Cache(kCacheSize);
 var currentPageNumber = 1;
 
+/**
+ * PDFDB wraps IndexedDB to store and retrieve documents for offline reading
+ */
+var PDFDB = function pdfdbPDFDB(options) {
+	options = options || {};
+	
+	// shortcuts to vendor-prefixed classes
+	var IndexedDB = window.mozIndexedDB || window.webkitIndexedDB || window.IndexedDB || null;
+	
+	if (!IndexedDB) {
+		if (options.onError)
+			options.onError();
+		return null; // fail fast for oldies
+	}
+	
+	var empty = function pdfdbEmpty() {};
+	
+	var Transaction = window.webkitIDBTransaction || window.IDBTransaction || null;
+	
+	var self = this;
+	
+	var db, objectStore;
+	var version = '1',
+		schema = {
+			name: 'files',
+			options: {keyPath: 'name'}
+		};
+	
+	this.open = function pdfdbOpen() {
+		var reqOpen = IndexedDB.open('files');
+		
+		reqOpen.onsuccess = function pdfdbOpenSuccess(evt) {
+	    db = evt.target.result;
+	    console.log('PDFDB.open', db, db.version, version);
+	    
+	    // First hit, initialize database.
+	    if (options.flush || db.version != version)
+	    	self.create();
+	    else
+	    	options.onLoad();
+	  };
+	  reqOpen.onfailure = options.onError || empty;
+	};
+	
+	this.create = function pdfdbCreate() {
+		var versionRequest = db.setVersion(version);
+
+		versionRequest.onsuccess = function pdfdbVersionSuccess() {
+			
+			// Might be useful for debugging
+			if (db.objectStoreNames.contains(schema.name)) {
+        db.deleteObjectStore(schema.name);
+      }
+			
+			objectStore = db.createObjectStore(schema.name, schema.options);
+			// TODO: objectStore.createIndex
+			
+			objectStore.onsuccess = function pdfdbCreateSuccess() {
+				if (options.onLoad)
+	  			options.onLoad();
+	  	};
+	  	objectStore.onfailure = options.onError || empty;
+	  	
+	  	if (db.objectStoreNames.contains(schema.name)) {
+	  		if (options.onLoad)
+	  			options.onLoad();
+      }
+		}
+		versionRequest.onfailure = options.onError || empty;
+	};
+	
+	// Helpers for objectStore transactions
+	var access = function pdfdbGetStore(write) {
+		var trans = db.transaction([schema.name], write ? Transaction.READ_WRITE : Transaction.READ_ONLY, 0);
+	  return trans.objectStore(schema.name);
+	};
+	// Test if a objectStore event was successful and fire according events
+	var expectResult = function(onSuccess, onError) {
+		return function promise(evt) {
+			var result = evt.target.result;
+			if (result) {
+				if (onSuccess)
+					onSuccess(result);
+			} else {
+				if (onError)
+					onError();
+			}
+		};
+	};
+	
+	this.putFile = function pdfdbPutFile(data, onSuccess, onError) {
+		var putRequest = access(true).add(data);
+
+		putRequest.onsuccess = expectResult(onSuccess, onError);
+		putRequest.onerror = onError || empty;
+	};
+	
+	this.getFile = function pdfdbGetFile(key, onSuccess, onError) {
+		var getRequest = access().get(key);
+
+		getRequest.onsuccess = expectResult(onSuccess, onError);
+		getRequest.onerror = onError || empty;
+	};
+	
+	this.deleteFile = function pdfdbDeleteFile(key, onSuccess, onError) {
+		var deleteRequest = access(true).delete(key);
+
+		deleteRequest.onsuccess = onSuccess || empty; // Spec != Firefox, result should be "key"
+		deleteRequest.onerror = onError || empty;
+	};
+	
+	this.getAllFiles = function pdfdbGetAllFiles(onSuccess, onComplete, onError) {
+		var getAllRequest = access().openCursor();
+
+		getAllRequest.onsuccess = function(evt) {
+			
+			var cursor = evt.target.result;
+			
+			if (cursor) {
+				if (onSuccess)
+					onSuccess(cursor.value);
+				
+				cursor.continue();
+			} else {
+				if (onComplete)
+					onComplete();
+			}
+		};
+		// getAllRequest.onerror = onError || empty;
+	};
+
+	this.clearFiles = function pdfdbClearFiles(onSuccess, onError) {
+		var clearRequest = access(true).clear();
+
+		clearRequest.onsuccess = onSuccess || empty;
+		clearRequest.onerror = onError || empty;
+	};
+	
+	this.open();
+	
+};
+
+/**
+ * PDFDB test bed
+ *
+var db = new PDFDB({
+	onLoad: function() {
+		console.log('Loaded');
+		
+		db.getFile('test.pdf', function(result) {
+			console.log('Found test.pdf', result);
+		}, function(result) {
+			console.log('NOT found test.pdf', result);
+			
+			db.putFile({name: 'test.pdf', data: 'Hello World'}, function(result) {
+				console.log('Store test', result);
+				
+				db.getFile('test.pdf', function(result) {
+					console.log('Found test.pdf', result);
+					
+					db.deleteFile('test.pdf', function(result) {
+						console.log('Deleted test.pdf', result);
+						db.getFile('test.pdf', function(result) {
+							console.log('Nope, test.pdf wasnt deleted', result);
+						}, function(result) {
+							console.log('Really, test.pdf is deleted', result);
+						});
+					}, function() {
+						console.log('Could not delete test.pdf');
+					});
+				});
+			}, function(result) {
+				console.log('Not stored test.pdf', result);
+			});
+		});
+		
+	},
+	onError: function() {
+		console.warn('FAIL');
+	},
+	flush: true
+});
+console.log('Start db');
+*/
+
+
 var PDFView = {
   pages: [],
   thumbnails: [],
@@ -116,19 +302,110 @@ var PDFView = {
 
   open: function pdfViewOpen(url, scale) {
     document.title = this.url = url;
+    
+    if (PDFView.db) {
+    	PDFView.openFromDb(url, scale);
+    } else {
+    	PDFView.db = new PDFDB({
+    		onLoad: function() {
+    			PDFView.openFromDb(url, scale);
+    		},
+    		onError: function() {
+    			PDFView.openFromUrl(url, scale);
+    		}
+    	});
+    }
+  },
+  
+  openFromDb: function(url, scale) {
+  	PDFView.db.getFile(url, function(result) {
+			var data = result.data,
+				buffer = new Uint8Array(data.length);
+			
+			for ( var i = 0, length = data.length; i < length; i += 1) {
+				buffer[i] = data.charCodeAt(i);
+			}
+			
+			PDFView.updateList();
+			
+			PDFView.load(buffer, scale);
+		}, function() {
+			PDFView.openFromUrl(url, scale);
+		});
+  },
+  
+  openFromUrl: function pdfViewOpenFile(url, scale) {
+  	getPdf(
+	    {
+	      url: url,
+	      progress: function getPdfProgress(evt) {
+	        if (evt.lengthComputable)
+	          PDFView.progress(evt.loaded / evt.total);
+	      },
+	      error: PDFView.error
+	    },
+	    function getPdfLoad(buffer) {
+	    	
+	    	if (buffer instanceof ArrayBuffer) {
+	    		buffer = new Uint8Array(buffer);
+	    		var str = new Array(buffer.length);
+					for (var i = 0, length = buffer.length; i < length; i += 1) {
+						str[i] = String.fromCharCode(buffer[i]);
+					}
+					str = str.join('');
+					
+					console.log('Saving file to DB');
+					
+		    	PDFView.db.putFile({
+		    		name: url,
+		    		data: str
+		    	}, function() {
+		    		PDFView.updateList();
+		    	});
+	    	}
+	    	
+	      PDFView.load(buffer, scale);
+	    }
+	   );
+  },
 
-    getPdf(
-      {
-        url: url,
-        progress: function getPdfProgress(evt) {
-          if (evt.lengthComputable)
-            PDFView.progress(evt.loaded / evt.total);
-        },
-        error: PDFView.error
-      },
-      function getPdfLoad(data) {
-        PDFView.load(data, scale);
-      });
+  updateList: function pdfViewUpdateList() {
+  	// Should go somewhere else
+		var select = document.getElementById('fileDropdown');
+		select.innerHTML = '';
+		
+		var option = document.createElement('option');
+		option.text = 'Local Storage:';
+		option.disabled = true;
+		select.appendChild(option);
+		
+		PDFView.db.getAllFiles(function pdfViewUpdateListSuccess(result) {
+			var option = document.createElement('option');
+			option.text = select.value = result.name;
+			
+			select.appendChild(option);
+			
+			option.selected = (result.name == PDFView.url) ? true : false;
+		}, function pdfViewUpdateListComplete() {
+			select.style.display = (select.childNodes.length > 1) ? '' : 'none'; 
+		});
+  },
+  
+  install: function pdfViewInstall() {
+  	navigator.mozApps.install({
+		  url: location.href.replace(/[^\/]*$/, '') + 'manifest.webapp',
+		  onsuccess: function() {
+		  	document.getElementById('install').style.display = 'none';
+		  },
+	    onerror: function (errObj) {
+	      alert('Installation failed, try again later.');
+	    }
+		});
+  },
+  
+  change: function pdfViewChange() {
+  	var value = document.getElementById('fileDropdown').value;
+  	if (value && value != this.url) this.open(value);
   },
 
   download: function pdfViewDownload() {
@@ -591,6 +868,12 @@ window.addEventListener('load', function webViewerLoad(evt) {
 
   var scale = ('scale' in params) ? params.scale : kDefaultScale;
   PDFView.open(params.file || kDefaultURL, parseFloat(scale));
+  
+  navigator.mozApps.amInstalled(function(result) {
+  	if (result) {
+  		document.getElementById('install').style.display = 'none';
+		}
+  });	
 
   if (!window.File || !window.FileReader || !window.FileList || !window.Blob)
     document.getElementById('fileInput').setAttribute('hidden', 'true');
@@ -646,6 +929,10 @@ window.addEventListener('change', function webViewerChange(evt) {
   if (!files || files.length == 0)
     return;
 
+  // Read as a binary string since "readAsArrayBuffer" is not yet
+  // implemented in Firefox.
+  var file = files[0];
+
   // Read the local file into a Uint8Array.
   var fileReader = new FileReader();
   fileReader.onload = function webViewerChangeFileReaderOnload(evt) {
@@ -656,14 +943,20 @@ window.addEventListener('change', function webViewerChange(evt) {
     for (var i = 0; i < data.length; i++)
       uint8Array[i] = data.charCodeAt(i);
     PDFView.load(uint8Array);
+    
+    if (PDFView.db) {
+    	PDFView.db.putFile({
+    		name: file.name,
+    		data: data
+    	}, function() {
+    		PDFView.updateList();
+    	});
+    }
   };
-
-  // Read as a binary string since "readAsArrayBuffer" is not yet
-  // implemented in Firefox.
-  var file = files[0];
+  
   fileReader.readAsBinaryString(file);
-
-  document.title = file.name;
+  
+  document.title = this.url = file.name;
 
   // URL does not reflect proper document location - hiding some icons.
   document.getElementById('viewBookmark').setAttribute('hidden', 'true');
